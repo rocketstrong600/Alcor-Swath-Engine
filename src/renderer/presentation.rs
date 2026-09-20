@@ -63,7 +63,7 @@ impl VKSurface {
 }
 
 pub struct VKSwapchainCapabilities {
-    pub surface_capibilities: vk::SurfaceCapabilitiesKHR,
+    pub surface_capabilities: vk::SurfaceCapabilitiesKHR,
     pub surface_formats: Vec<vk::SurfaceFormatKHR>,
     pub present_modes: Vec<vk::PresentModeKHR>,
 }
@@ -74,7 +74,7 @@ impl VKSwapchainCapabilities {
         physical_device: vk::PhysicalDevice,
     ) -> Result<Self, vk::Result> {
         Ok(Self {
-            surface_capibilities: unsafe {
+            surface_capabilities: unsafe {
                 vk_surface
                     .surface_loader
                     .get_physical_device_surface_capabilities(physical_device, vk_surface.surface)?
@@ -117,12 +117,12 @@ impl VKSwapchainCapabilities {
     pub fn ideal_n_images(&self) -> u32 {
         let mut image_count = 3;
 
-        if self.surface_capibilities.max_image_count == 0 {
-            image_count = image_count.max(self.surface_capibilities.min_image_count);
+        if self.surface_capabilities.max_image_count == 0 {
+            image_count = image_count.max(self.surface_capabilities.min_image_count);
         } else {
             image_count = image_count.clamp(
-                self.surface_capibilities.min_image_count,
-                self.surface_capibilities.max_image_count,
+                self.surface_capabilities.min_image_count,
+                self.surface_capabilities.max_image_count,
             );
         }
         image_count
@@ -131,11 +131,11 @@ impl VKSwapchainCapabilities {
     pub fn get_extent(&self, window: &Window) -> vk::Extent2D {
         // window manager can indicate that Size of window will be determined by swapchain
         // return current exent?
-        if self.surface_capibilities.current_extent.width != u32::MAX {
-            self.surface_capibilities.current_extent
+        if self.surface_capabilities.current_extent.width != u32::MAX {
+            self.surface_capabilities.current_extent
         } else {
-            let max_extent = self.surface_capibilities.max_image_extent;
-            let min_extent = self.surface_capibilities.min_image_extent;
+            let max_extent = self.surface_capabilities.max_image_extent;
+            let min_extent = self.surface_capabilities.min_image_extent;
             vk::Extent2D::default()
                 .width(
                     window
@@ -192,7 +192,7 @@ impl VKSwapchain {
             .image_array_layers(1) // always 1 for non sterioscopic displays
             .image_usage(vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::TRANSFER_DST) // opperations to be used on image can also be transfer
             .image_sharing_mode(vk::SharingMode::EXCLUSIVE) // single queue can access image
-            .pre_transform(capibilities.surface_capibilities.current_transform) // Don't Rotate Image
+            .pre_transform(capibilities.surface_capabilities.current_transform) // Don't Rotate Image
             .composite_alpha(vk::CompositeAlphaFlagsKHR::OPAQUE) // Alpha Blending with other windows = Opaque
             .present_mode(capibilities.ideal_present_mode())
             .clipped(true); // ignore Pixel covered by other windows
