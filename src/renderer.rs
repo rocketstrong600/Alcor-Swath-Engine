@@ -172,11 +172,8 @@ impl VKRenderer<'_> {
         mut vulkan_ctx: VKContext,
         frames_in_flight: u32,
     ) -> Result<Self, Box<dyn error::Error>> {
-        let vulkan_present = unsafe {
-            VKPresent::default()
-                .max_frames(frames_in_flight, &vulkan_ctx)
-                .unwrap()
-        };
+        let vulkan_present =
+            unsafe { VKPresent::default().max_frames(frames_in_flight, &vulkan_ctx)? };
 
         let cmd_pool_info = vk::CommandPoolCreateInfo::default()
             .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)
