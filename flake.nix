@@ -14,14 +14,25 @@
         pkgs = import nixpkgs { inherit system; };
         craneLib = crane.mkLib pkgs;
         
+        # Custom source filter to include vk.xml and shaders alongside Rust code
+        rustAndShaders = path: type:
+          (builtins.match ".*xml$" path != null) ||
+          (builtins.match ".*(slang|vert|frag|glsl|spv)$" path != null) ||
+          (craneLib.filterCargoSources path type);
+
+        customSrc = pkgs.lib.cleanSourceWith {
+          src = craneLib.path ./.;
+          filter = rustAndShaders;
+        };
+        
         # 1. Build only the dependencies (caches heavily)
         cargoArtifacts = craneLib.buildDepsOnly {
-          src = craneLib.cleanCargoSource (craneLib.path ./.);
+          src = customSrc;
         };
 
         # 2. Build the actual crate
         my-crate = craneLib.buildPackage {
-          src = craneLib.cleanCargoSource (craneLib.path ./.);
+          src = customSrc;
           inherit cargoArtifacts;
         };
       in

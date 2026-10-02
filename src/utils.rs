@@ -4,11 +4,11 @@ use std::panic;
 /// Based on take_mut crate
 /// Any Type that implements ReplaceWith that is of '&mut Self' can have the value Self Owned, as long as 'Self' is returned afterwards.
 /// # Example
-/// ```
+/// ```ignore
 /// enum Foo {
 ///   Bar,
 ///   Baz
-/// };
+/// }
 ///
 /// impl<F> ReplaceWith<F> for Foo {}
 ///

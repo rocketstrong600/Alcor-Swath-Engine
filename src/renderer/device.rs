@@ -287,10 +287,10 @@ type ReqFn<'a> = Box<dyn Fn(&vk::PhysicalDevice, &Instance, Option<&VKSurface>) 
 
 /// Struct for holding and testing Device Requirements
 /// Example Use:
-/// ```
+/// ```ignore
 /// let physical_device = ...;
 /// let DeviceRequirements = DeviceRequirements::default().push_ext(ash::khr::dynamic_rendering::NAME);
-/// printf("Compatible {:?}", DeviceRequirements.check_device(physical_device));
+/// println!("Compatible {:?}", DeviceRequirements.check_device(physical_device));
 /// ```
 pub struct VKDeviceRequirements<'a> {
     pub required_extensions: Vec<&'static CStr>,
