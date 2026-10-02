@@ -1,9 +1,10 @@
-use ash::vk::QueueFlags;
+pub mod requirements;
+
+use crate::renderer::device::requirements::VKDeviceRequirements;
 use ash::{Device, Instance, khr, vk};
 use gpu_allocator::vulkan;
 use log::info;
 use std::error;
-use std::ffi::CStr;
 
 use crate::renderer::VKInstance;
 use crate::renderer::presentation::{VKSurface, VKSwapchainCapabilities};
@@ -25,7 +26,14 @@ impl VKDevice {
         // requirements, Possibly by requesting a mutable reference to-
         // base extensions before device setup.
         let mut dev_requirements = VKDeviceRequirements::default()
-            .add_queue_flag(vk::QueueFlags::GRAPHICS)
+            .instance_verion(instance.instance_version)
+            .require_api_version(vk::API_VERSION_1_3)
+            .add_queue_request(
+                requirements::VKQueueRequest::default()
+                    .queue_role(0)
+                    .require_queue_flag(vk::QueueFlags::GRAPHICS)
+                    .surface_support(true),
+            )
             .push_ext(khr::swapchain::NAME)
             .push_info(
                 vk::PhysicalDeviceVulkan12Features::default()
@@ -39,7 +47,7 @@ impl VKDevice {
             )
             .push_fn(|physical_device, instance, _| {
                 let device_properties =
-                    unsafe { instance.get_physical_device_properties(*physical_device) };
+                    unsafe { instance.get_physical_device_properties(physical_device) };
                 // Declare llvmpipe virtual GPU as incompatible
                 !device_properties
                     .device_name_as_c_str()
@@ -47,16 +55,12 @@ impl VKDevice {
                     .to_string_lossy()
                     .starts_with("llvmpipe")
             })
-            .push_fn(|physical_device, _, vk_surface: Option<&VKSurface>| {
-                if let Some(vk_surface) = vk_surface {
-                    let swap_capabilities =
-                        VKSwapchainCapabilities::new(vk_surface, *physical_device).unwrap();
+            .push_fn(|physical_device, _, vk_surface: &VKSurface| {
+                let swap_capabilities =
+                    VKSwapchainCapabilities::new(vk_surface, physical_device).unwrap();
 
-                    swap_capabilities.surface_capabilities.min_image_count > 0
-                        || !swap_capabilities.present_modes.is_empty()
-                } else {
-                    true
-                }
+                swap_capabilities.surface_capabilities.min_image_count > 0
+                    || !swap_capabilities.present_modes.is_empty()
             });
 
         // There is no way for the scoring function to be changed by the user then why have it passed as an argument.
@@ -67,6 +71,10 @@ impl VKDevice {
             &dev_requirements,
             vulkan_surface,
         )?;
+
+        let ideal_graphics_queue = ideal_graphics_queue
+            .get_queue(0)
+            .expect("No graphics Queue Index");
 
         let mut device_properties_two = vk::PhysicalDeviceProperties2::default();
 
@@ -92,7 +100,7 @@ impl VKDevice {
 
         info!(
             "VK Device Memory: {}",
-            physical_device_memory_size(&p_device, &instance.instance)
+            physical_device_memory_size(p_device, &instance.instance)
         );
 
         // Set up Logical Device (Set Features, Enable Extensions, Configure Extensions)
@@ -156,44 +164,35 @@ impl VKDevice {
         score_function: F,
         dev_requirements: &VKDeviceRequirements,
         vulkan_surface: &VKSurface,
-    ) -> Result<(vk::PhysicalDevice, u32 /* queue_index */), Box<dyn error::Error>>
+    ) -> Result<(vk::PhysicalDevice, requirements::VKResolvedQueues), Box<dyn error::Error>>
     where
-        F: Fn(&vk::PhysicalDevice, &Instance) -> u64,
+        F: Fn(vk::PhysicalDevice, &Instance) -> u64,
     {
         let physical_devices = unsafe { instance.enumerate_physical_devices()? };
 
-        let mut queue_index = 0;
-
-        let physical_devices: Vec<(&vk::PhysicalDevice, u32)> = physical_devices
-            .iter()
-            .filter_map(|p_device| {
-                dev_requirements
-                    .device_compat(
+        let mut physical_devices: Vec<(u64, vk::PhysicalDevice, requirements::VKResolvedQueues)> =
+            physical_devices
+                .into_iter()
+                .filter_map(|p_device| {
+                    let score = score_function(p_device, instance);
+                    Some((
+                        score,
                         p_device,
-                        instance,
-                        Some(vulkan_surface),
-                        Some(&mut queue_index),
-                    )
-                    .then_some((p_device, queue_index))
-            })
-            .collect();
-
-        // Turn each physical device into tupil containing our score and device
-        let mut physical_devices: Vec<(u64, &vk::PhysicalDevice, u32)> = physical_devices
-            .iter()
-            .map(|physical_device| {
-                let score = score_function(physical_device.0, instance);
-                (score, physical_device.0, physical_device.1)
-            })
-            .collect();
+                        dev_requirements
+                            .device_compat(p_device, instance, vulkan_surface)
+                            .as_option()?,
+                    ))
+                })
+                .collect();
 
         // sort by the score
         physical_devices.sort_by_key(|device_score| device_score.0);
 
         // Highest scoring element last in vec
-        let physical_device = physical_devices.last().ok_or("No Suitable Devices Found")?;
+        let physical_device: (u64, vk::PhysicalDevice, requirements::VKResolvedQueues) =
+            physical_devices.pop().ok_or("No Suitable Devices Found")?;
         // Return device if score was greater than 0
-        Ok((*physical_device.1, physical_device.2))
+        Ok((physical_device.1, physical_device.2))
     }
 
     pub fn create_image(
@@ -282,143 +281,11 @@ impl VKDevice {
     }
 }
 
-/// Function for Checking Requirements
-type ReqFn<'a> = Box<dyn Fn(&vk::PhysicalDevice, &Instance, Option<&VKSurface>) -> bool + 'a>;
-
-/// Struct for holding and testing Device Requirements
-/// Example Use:
-/// ```ignore
-/// let physical_device = ...;
-/// let DeviceRequirements = DeviceRequirements::default().push_ext(ash::khr::dynamic_rendering::NAME);
-/// println!("Compatible {:?}", DeviceRequirements.check_device(physical_device));
-/// ```
-pub struct VKDeviceRequirements<'a> {
-    pub required_extensions: Vec<&'static CStr>,
-    pub device_extended_info: Vec<Box<dyn vk::ExtendsDeviceCreateInfo + 'a>>,
-    pub requirement_functions: Vec<ReqFn<'a>>,
-    pub required_queue_flags: vk::QueueFlags,
-}
-
-impl<'a> VKDeviceRequirements<'a> {
-    /// Adds a Vulkan extention name to the requirements
-    pub fn push_ext(mut self, ext_name: &'static CStr) -> Self {
-        self.required_extensions.push(ext_name);
-        self
-    }
-
-    /// Adds Structures that extend the creation of logical Devices to the requirements
-    /// This is so they can be used on logical Device creation
-    pub fn push_info<T>(mut self, dev_ext_info: T) -> Self
-    where
-        T: vk::ExtendsDeviceCreateInfo + 'a,
-    {
-        self.device_extended_info.push(Box::new(dev_ext_info));
-        self
-    }
-
-    /// Adds a `fn(vk::PhysicalDevice, &Instance, Option<&VKSurface>) -> bool` to the device compatibility check process
-    /// fn must return whether device meats functions requirements.
-    pub fn push_fn<F>(mut self, fn_test: F) -> Self
-    where
-        F: Fn(&vk::PhysicalDevice, &Instance, Option<&VKSurface>) -> bool + 'a,
-    {
-        self.requirement_functions.push(Box::new(fn_test));
-        self
-    }
-
-    // add queue flag requirements
-    pub fn add_queue_flag(mut self, queue_flag: vk::QueueFlags) -> Self {
-        self.required_queue_flags |= queue_flag;
-        self
-    }
-
-    /// Checks if Physical Device is Compatible.
-    /// `surface_requirment` is an optional type for checking if the queue Supports the surface we want to display too.
-    /// `checked_queue` is an Optional argument for Obtaining the Queue Index that was.
-    // Maybe upgrade to -> Result Type as we currently treat less related errors as an incompatible device
-    // Most of the errors are 'VKResult' errors retaining to memory issues unlikely at early initialisation.
-    // TODO: Return Reason for Compatibility issue in Result With Custom Error Type
-    pub fn device_compat(
-        &self,
-        physical_device: &vk::PhysicalDevice,
-        instance: &Instance,
-        surface_requirment: Option<&VKSurface>,
-        mut checked_queue: Option<&mut u32>,
-    ) -> bool {
-        let device_extentions = unsafe {
-            instance
-                .enumerate_device_extension_properties(*physical_device)
-                .unwrap_or_default()
-        };
-
-        let device_extentions: Vec<&CStr> = device_extentions
-            .iter()
-            .map(|ext_prop| ext_prop.extension_name_as_c_str().unwrap_or_default())
-            .collect();
-
-        let has_extentions = self
-            .required_extensions
-            .iter()
-            .all(|extention| device_extentions.contains(extention));
-
-        let funcs_passes = self
-            .requirement_functions
-            .iter()
-            .all(|func| func(physical_device, instance, surface_requirment));
-
-        let queue_family_prop =
-            unsafe { instance.get_physical_device_queue_family_properties(*physical_device) };
-
-        // First suported queu_prop
-        let queue_passes = queue_family_prop.iter().enumerate().any(|queue_prop| {
-            let mut suported = queue_prop.1.queue_flags.contains(self.required_queue_flags);
-            // If we got passed a surface Requirement Check it is Supported
-            if let Some(surface_req) = surface_requirment {
-                suported = suported
-                    && surface_req
-                        .queue_supports_surface(*physical_device, queue_prop.0 as u32)
-                        .unwrap_or(false);
-            }
-            if let Some(queue_index) = checked_queue.as_mut() {
-                if suported {
-                    // set supported queue_index to be passed back
-                    **queue_index = queue_prop.0 as u32;
-                }
-            }
-            suported
-        });
-
-        has_extentions && funcs_passes && queue_passes
-    }
-
-    pub fn get_requirements(&self) -> &[&'static CStr] {
-        self.required_extensions.as_slice()
-    }
-
-    pub fn get_requirements_raw(&self) -> Vec<*const std::ffi::c_char> {
-        self.required_extensions
-            .iter()
-            .map(|req| req.as_ptr())
-            .collect()
-    }
-}
-
-impl Default for VKDeviceRequirements<'_> {
-    fn default() -> Self {
-        Self {
-            required_extensions: Vec::new(),
-            device_extended_info: Vec::new(),
-            requirement_functions: Vec::new(),
-            required_queue_flags: QueueFlags::empty(),
-        }
-    }
-}
-
 // Calculate a capability score for a physical device
 // score improvement should go down as importance of property goes down
-fn score_physical_device(physical_device: &vk::PhysicalDevice, instance: &Instance) -> u64 {
+fn score_physical_device(physical_device: vk::PhysicalDevice, instance: &Instance) -> u64 {
     let mut score: u64 = 0;
-    let device_properties = unsafe { instance.get_physical_device_properties(*physical_device) };
+    let device_properties = unsafe { instance.get_physical_device_properties(physical_device) };
 
     let device_type = device_properties.device_type;
     match device_type {
@@ -431,11 +298,11 @@ fn score_physical_device(physical_device: &vk::PhysicalDevice, instance: &Instan
         _ => {}
     }
 
-    let device_features = unsafe { instance.get_physical_device_features(*physical_device) };
+    let device_features = unsafe { instance.get_physical_device_features(physical_device) };
 
     let device_extensions = unsafe {
         instance
-            .enumerate_device_extension_properties(*physical_device)
+            .enumerate_device_extension_properties(physical_device)
             .unwrap_or_default()
     };
 
@@ -449,7 +316,7 @@ fn score_physical_device(physical_device: &vk::PhysicalDevice, instance: &Instan
     }
 
     let queue_family_properties =
-        unsafe { instance.get_physical_device_queue_family_properties(*physical_device) };
+        unsafe { instance.get_physical_device_queue_family_properties(physical_device) };
 
     // good cards should be capable of compute
     let compute_queue = queue_family_properties
@@ -478,11 +345,11 @@ fn score_physical_device(physical_device: &vk::PhysicalDevice, instance: &Instan
 
 // Get device memory in MiB
 pub fn physical_device_memory_size(
-    physical_device: &vk::PhysicalDevice,
+    physical_device: vk::PhysicalDevice,
     instance: &Instance,
 ) -> u64 {
     let memory_properties =
-        unsafe { instance.get_physical_device_memory_properties(*physical_device) };
+        unsafe { instance.get_physical_device_memory_properties(physical_device) };
 
     memory_properties
         .memory_heaps

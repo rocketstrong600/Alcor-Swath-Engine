@@ -29,6 +29,7 @@ pub const ENGINE_PATCH: &str = env!("CARGO_PKG_VERSION_PATCH");
 pub struct VKInstance {
     pub instance: Instance,
     pub entry: Entry,
+    pub instance_version: u32,
 }
 
 impl VKInstance {
@@ -45,6 +46,8 @@ impl VKInstance {
             ENGINE_MINOR.parse()?,
             ENGINE_PATCH.parse()?,
         );
+
+        let instance_version = vk::make_api_version(0, 1, 4, 0);
 
         let app_info = vk::ApplicationInfo::default()
             .api_version(vk::make_api_version(0, 1, 4, 0))
@@ -66,7 +69,11 @@ impl VKInstance {
 
         let instance = Self::create_instance(&entry, &app_info, extension_names)?;
 
-        Ok(Self { entry, instance })
+        Ok(Self {
+            entry,
+            instance,
+            instance_version,
+        })
     }
 
     fn create_instance(
