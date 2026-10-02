@@ -27,20 +27,15 @@ impl VKDevice {
         let mut dev_requirements = VKDeviceRequirements::default()
             .add_queue_flag(vk::QueueFlags::GRAPHICS)
             .push_ext(khr::swapchain::NAME)
-            .push_ext(khr::dynamic_rendering::NAME)
-            .push_ext(khr::synchronization2::NAME)
-            .push_ext(khr::timeline_semaphore::NAME)
-            .push_ext(khr::buffer_device_address::NAME)
             .push_info(
-                vk::PhysicalDeviceDynamicRenderingFeatures::default().dynamic_rendering(true),
-            )
-            .push_info(vk::PhysicalDeviceSynchronization2Features::default().synchronization2(true))
-            .push_info(
-                vk::PhysicalDeviceTimelineSemaphoreFeatures::default().timeline_semaphore(true),
-            )
-            .push_info(
-                vk::PhysicalDeviceBufferDeviceAddressFeatures::default()
+                vk::PhysicalDeviceVulkan12Features::default()
+                    .timeline_semaphore(true)
                     .buffer_device_address(true),
+            )
+            .push_info(
+                vk::PhysicalDeviceVulkan13Features::default()
+                    .dynamic_rendering(true)
+                    .synchronization2(true),
             )
             .push_fn(|physical_device, instance, _| {
                 let device_properties =

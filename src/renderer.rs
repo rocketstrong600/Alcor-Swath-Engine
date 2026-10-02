@@ -47,7 +47,7 @@ impl VKInstance {
         );
 
         let app_info = vk::ApplicationInfo::default()
-            .api_version(vk::make_api_version(0, 1, 3, 0))
+            .api_version(vk::make_api_version(0, 1, 4, 0))
             .application_name(game_info.app_name)
             .application_version(vk::make_api_version(
                 0,

@@ -50,7 +50,7 @@ fn main() {
     };
 
     let out_dir = env::var_os("OUT_DIR").unwrap();
-    let dest_path = Path::new(&out_dir).join("generated_vulkan.rs");
+    let dest_path = Path::new(&out_dir).join("generated_vk_info.rs");
     fs::write(&dest_path, generated_code.to_string()).expect("Failed to write generated code");
     println!("Generated rust code to: {}", dest_path.display());
 
