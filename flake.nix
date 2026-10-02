@@ -1,20 +1,33 @@
 {
   inputs = {
-    naersk.url = "github:nix-community/naersk/master";
+    crane = {
+      url = "github:ipetkov/crane";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     utils.url = "github:numtide/flake-utils";
   };
 
-  outputs = { self, nixpkgs, utils, naersk }:
+  outputs = { self, nixpkgs, utils, crane }:
     utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs { inherit system; };
-        naersk-lib = pkgs.callPackage naersk { };
+        craneLib = crane.mkLib pkgs;
+        
+        # 1. Build only the dependencies (caches heavily)
+        cargoArtifacts = craneLib.buildDepsOnly {
+          src = craneLib.cleanCargoSource (craneLib.path ./.);
+        };
+
+        # 2. Build the actual crate
+        my-crate = craneLib.buildPackage {
+          src = craneLib.cleanCargoSource (craneLib.path ./.);
+          inherit cargoArtifacts;
+        };
       in
       {
-
-        defaultPackage = naersk-lib.buildPackage ./.;
-        devShell = with pkgs; mkShell {
+        packages.default = my-crate;
+        devShells.default = with pkgs; mkShell {
           buildInputs = [ cargo rustc rustfmt pre-commit rustPackages.clippy rust-analyzer vulkan-loader vulkan-validation-layers vulkan-tools-lunarg libxkbcommon wayland shader-slang libX11 libXcursor libXi];
           packages = [ vulkan-tools renderdoc mangohud harper ];
           RUST_SRC_PATH = rustPlatform.rustLibSrc;
