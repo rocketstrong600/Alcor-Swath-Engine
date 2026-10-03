@@ -55,6 +55,14 @@ impl<'a> VKDeviceRequirements<'a> {
 
     /// add queue request
     pub fn add_queue_request(mut self, queue_request: VKQueueRequest) -> Self {
+        debug_assert!(
+            !self
+                .queue_requests
+                .iter()
+                .any(|r| r.role_id == queue_request.role_id),
+            "duplicate queue role_id: {}",
+            queue_request.role_id
+        );
         self.queue_requests.push(queue_request);
         self
     }
@@ -64,11 +72,22 @@ impl<'a> VKDeviceRequirements<'a> {
     where
         I: IntoIterator<Item = VKQueueRequest>,
     {
-        self.queue_requests.extend(queue_requests);
+        for request in queue_requests {
+            debug_assert!(
+                !self
+                    .queue_requests
+                    .iter()
+                    .any(|r| r.role_id == request.role_id),
+                "duplicate queue role_id detected: {}",
+                request.role_id
+            );
+
+            self.queue_requests.push(request);
+        }
         self
     }
 
-    // set the vulakan instance api version
+    // set the Vulkan instance API version
     pub fn instance_verion(mut self, version: u32) -> Self {
         self.api_version = version;
         self
@@ -284,19 +303,10 @@ impl VKQueueRequests {
             }
         }
 
-        if pending_queues
-            .iter()
-            .any(|(_, resolved)| resolved.is_none())
-        {
-            None
-        } else {
-            Some(
-                pending_queues
-                    .iter()
-                    .map(|(_, res)| res.expect("Queue Should be entirely Fulfilled"))
-                    .collect(),
-            )
-        }
+        pending_queues
+            .into_iter()
+            .map(|(_, resolved)| resolved)
+            .collect::<Option<VKResolvedQueues>>()
     }
 }
 
